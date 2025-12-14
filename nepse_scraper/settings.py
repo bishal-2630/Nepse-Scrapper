@@ -21,7 +21,11 @@ ALLOWED_HOSTS = []
 
 
 if DEBUG:
-    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+    ALLOWED_HOSTS = ['localhost', 
+                    '127.0.0.1',
+                    'engine-scrapper-1-wify.onrender.com',
+                    ]
+    
 else:
    
     allowed_hosts_str = os.environ.get('ALLOWED_HOSTS', '')
