@@ -1,21 +1,28 @@
-# Core
+asgiref==3.11.0
+beautifulsoup4==4.12.2
+certifi==2025.11.12
+charset-normalizer==3.4.4
+dj-database-url==2.0.0
 Django==4.2.7
 djangorestframework==3.14.0
 drf-yasg==1.21.7
-
-# Scraping
-requests==2.31.0
-beautifulsoup4==4.12.2
-lxml==4.9.3
-pandas==2.1.1
-
-# Deployment
 gunicorn==21.2.0
-whitenoise==6.5.0
+idna==3.11
+inflection==0.5.1
+lxml==4.9.3
+numpy==1.26.4
+packaging==25.0
+pandas==2.1.4
+python-dateutil==2.9.0.post0
 python-dotenv==1.0.0
-dj-database-url==2.0.0
-psycopg2-binary==2.9.9  # For PostgreSQL
-
-# Utilities
-python-dateutil==2.8.2
-pytz==2023.3
+pytz==2025.2
+PyYAML==6.0.3
+requests==2.31.0
+six==1.17.0
+soupsieve==2.8
+sqlparse==0.5.4
+typing_extensions==4.15.0
+tzdata==2025.3
+uritemplate==4.2.0
+urllib3==2.6.2
+whitenoise==6.5.0
