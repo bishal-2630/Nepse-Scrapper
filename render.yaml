@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: nepse-scraper
+    env: python
+    plan: free
+    region: singapore
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn nepse_scraper.wsgi:application"
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: WEB_CONCURRENCY
+        value: 4
+    healthCheckPath: /
+    autoDeploy: true
