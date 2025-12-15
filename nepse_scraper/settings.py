@@ -49,7 +49,9 @@ INSTALLED_APPS = [
     'rest_framework',
     'drf_yasg',
     'nepse_data',
+    'django_apscheduler',
 ]
+
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

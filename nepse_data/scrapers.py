@@ -184,3 +184,63 @@ def calculate_top_gainers_losers(date=None):
         'total_gainers': len(top_gainers),
         'total_losers': len(top_losers)
     }
+
+
+
+@staticmethod
+def scrape_with_retry(max_retries=3):
+    """Scrape with retry logic"""
+    for attempt in range(max_retries):
+        try:
+            data = NepseScraper.scrape_today_prices()
+            if data and len(data) > 10: 
+                return data
+            print(f"Attempt {attempt + 1}: Got insufficient data ({len(data) if data else 0} records)")
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed: {e}")
+        
+        if attempt < max_retries - 1:
+            time.sleep(5)  # Wait before retry
+    
+    return []
+
+@staticmethod
+def update_top_performers(date=None):
+    """Update TopGainers and TopLosers tables"""
+    from .models import TopGainers, TopLosers
+    
+    if not date:
+        date = timezone.now().date()
+    
+    # Get today's data
+    daily_data = DailyStockData.objects.filter(date=date)
+    
+    # Clear old entries for this date
+    TopGainers.objects.filter(date=date).delete()
+    TopLosers.objects.filter(date=date).delete()
+    
+    # Get top 10 gainers
+    gainers = daily_data.filter(change_percent__gt=0).order_by('-change_percent')[:10]
+    for i, data in enumerate(gainers, 1):
+        TopGainers.objects.create(
+            date=date,
+            rank=i,
+            company=data.company,
+            change_percent=data.change_percent,
+            volume=data.volume,
+            close_price=data.close_price
+        )
+    
+    # Get top 10 losers
+    losers = daily_data.filter(change_percent__lt=0).order_by('change_percent')[:10]
+    for i, data in enumerate(losers, 1):
+        TopLosers.objects.create(
+            date=date,
+            rank=i,
+            company=data.company,
+            change_percent=data.change_percent,
+            volume=data.volume,
+            close_price=data.close_price
+        )
+    
+    print(f"Updated top performers for {date}")
