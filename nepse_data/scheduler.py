@@ -1,129 +1,183 @@
 # nepse_data/scheduler.py
 import logging
+import threading
+import time
 from datetime import datetime
 import pytz
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
-
-# Nepal timezone
 NEPAL_TZ = pytz.timezone('Asia/Kathmandu')
 
-def scrape_daily_data():
+def get_current_nepal_time():
+    """Get current Nepal time"""
+    return datetime.now(NEPAL_TZ)
+
+def is_market_day_and_hours():
+    """Check if it's a market day and within market hours"""
+    current = get_current_nepal_time()
+    weekday = current.weekday()  # 0=Monday, 6=Sunday
+    hour = current.hour
+    
+    # Check if weekday (Monday-Friday)
+    if weekday >= 5:
+        return False, "Weekend - no trading"
+    
+    # Check market hours (11:00 AM to 3:00 PM)
+    if hour < 11:
+        return False, f"Market opens at 11:00 AM. Current: {current.strftime('%H:%M')}"
+    
+    if hour >= 15:
+        return False, f"Market closed at 3:00 PM. Current: {current.strftime('%H:%M')}"
+    
+    return True, f"Market is open! Current: {current.strftime('%H:%M')}"
+
+def check_and_scrape_if_needed():
     """
-    Function to scrape daily NEPSE data.
-    This will run on weekdays after market closes.
+    Smart scraper that checks if we need to scrape today's data
     """
     from .scrapers import NepseScraper
     from .models import DailyStockData
     
-    today = timezone.now().date()
+    current = get_current_nepal_time()
+    today = current.date()
     
-    # Check if today is weekday (Mon-Fri)
-    if today.weekday() >= 5:  # 5=Saturday, 6=Sunday
-        logger.info(f"Today is {today.strftime('%A')} - skipping scraping")
-        return "Skipped (weekend)"
+    logger.info("=" * 60)
+    logger.info(f"📅 DATE CHECK: {today}")
+    logger.info(f"⏰ NEPAL TIME: {current.strftime('%H:%M:%S')}")
+    logger.info(f"📆 DAY: {current.strftime('%A')}")
+    logger.info("=" * 60)
     
-    # IMPORTANT: Check if we're scraping TODAY or a past date
-    # For today, always scrape fresh data
-    # For past dates, check if data already exists
-    existing_count = DailyStockData.objects.filter(date=today).count()
+    # Check if we already have today's data
+    today_count = DailyStockData.objects.filter(date=today).count()
     
-    # If it's today, always scrape fresh data
-    # If it's a past date and we have data, skip
-    # For now, we're only scheduling today's scraping, so always scrape
+    if today_count > 0:
+        logger.info(f"✅ Already have {today_count} records for today")
+        
+        # Check if market is still open - we might want to refresh
+        market_open, msg = is_market_day_and_hours()
+        if market_open:
+            logger.info(f"🔄 Market is open. Consider refreshing data...")
+            # You can add logic to refresh if market is still open
+        return f"Already have {today_count} records for {today}"
     
-    logger.info(f"Starting daily scraping for {today}")
-    logger.info(f"Existing records for today: {existing_count}")
+    # Check if it's a market day
+    market_open, msg = is_market_day_and_hours()
+    
+    if not market_open:
+        logger.info(f"⏸️ {msg}")
+        
+        # If it's past market hours, check if website has today's data
+        if current.hour >= 15 and current.hour < 24:
+            logger.info("🌐 Trying to scrape today's closing data...")
+            return scrape_today_data()
+        else:
+            return f"No action: {msg}"
+    
+    # Market is open - scrape data
+    logger.info("🏦 Market is open! Scraping data...")
+    return scrape_today_data()
+
+def scrape_today_data():
+    """Scrape today's data"""
+    from .scrapers import NepseScraper
+    from .models import DailyStockData
+    
+    current = get_current_nepal_time()
+    today = current.date()
+    
+    logger.info(f"🚀 SCRAPING for {today}...")
     
     try:
-        # Delete existing data for today to ensure fresh scrape
+        # Delete any existing data for today
+        existing_count = DailyStockData.objects.filter(date=today).count()
         if existing_count > 0:
-            logger.info(f"Deleting {existing_count} existing records for {today}")
-            deleted_count, _ = DailyStockData.objects.filter(date=today).delete()
-            logger.info(f"Deleted {deleted_count} records")
+            logger.info(f"🗑️ Deleting {existing_count} old records...")
+            DailyStockData.objects.filter(date=today).delete()
         
-        # Scrape fresh data
-        data = NepseScraper.scrape_today_prices()
+        # Scrape with retry
+        data = NepseScraper.scrape_with_retry(max_retries=5)
         
-        if data and len(data) > 10:
-            # Save to database
-            saved_count = NepseScraper.save_to_database(data)
-            logger.info(f"Successfully saved {saved_count} fresh records")
+        if data and len(data) > 50:
+            saved = NepseScraper.save_to_database(data)
+            logger.info(f"✅ Successfully saved {saved} records for {today}")
             
             # Update top performers
             try:
                 NepseScraper.update_top_performers(today)
-                logger.info("Updated top gainers and losers")
+                logger.info("🏆 Updated top performers")
             except Exception as e:
-                logger.error(f"Failed to update top performers: {e}")
+                logger.error(f"⚠️ Failed to update top performers: {e}")
             
-            return f"Scraped {saved_count} fresh records"
+            # Log summary
+            today_data = DailyStockData.objects.filter(date=today)
+            gainers = today_data.filter(change_percent__gt=0).count()
+            losers = today_data.filter(change_percent__lt=0).count()
+            
+            logger.info("=" * 50)
+            logger.info(f"📊 TODAY'S SUMMARY ({today}):")
+            logger.info(f"   Total Stocks: {saved}")
+            logger.info(f"   Gainers: {gainers}")
+            logger.info(f"   Losers: {losers}")
+            logger.info(f"   Time: {current.strftime('%H:%M:%S')}")
+            logger.info("=" * 50)
+            
+            return f"✅ Scraped {saved} records for {today}"
         else:
-            logger.warning(f"No data received or insufficient data: {len(data) if data else 0} records")
-            return "No data received"
+            logger.warning(f"⚠️ No data received for {today}")
+            return f"⚠️ No data for {today}"
             
     except Exception as e:
-        logger.error(f"Error scraping data: {e}", exc_info=True)
-        return f"Error: {str(e)}"
+        logger.error(f"❌ Error scraping {today}: {e}")
+        return f"❌ Error: {e}"
 
-def start_scheduler():
-    """Start the background scheduler"""
-    try:
-        # Import inside function to handle ImportError gracefully
-        from apscheduler.schedulers.background import BackgroundScheduler
-        from django_apscheduler.jobstores import DjangoJobStore
-        from django_apscheduler import util
-        from django_apscheduler.models import DjangoJobExecution
+def start_daily_scraper():
+    """Start daily scraper that runs every 30 minutes"""
+    import threading
+    
+    def scraper_loop():
+        logger.info("🚀 Starting daily scraper service...")
+        logger.info("🔄 Will check every 30 minutes for fresh data")
         
-        # Create scheduler
-        scheduler = BackgroundScheduler(timezone=NEPAL_TZ)
-        
-        # Use Django's job store
-        scheduler.add_jobstore(DjangoJobStore(), "default")
-        
-        # Add the job to run at 4:15 PM Nepal time every weekday
-        scheduler.add_job(
-            scrape_daily_data,
-            trigger='cron',
-            hour=16,
-            minute=15,
-            day_of_week='mon-fri',
-            id='daily_nepse_scraping',
-            max_instances=1,
-            replace_existing=True,
-            name='Daily NEPSE Data Scraping'
-        )
-        
-        # Add cleanup job
-        @util.retry_on_exception()
-        def delete_old_job_executions(max_age=604800):
-            """Delete old job execution logs"""
-            DjangoJobExecution.objects.delete_old_job_executions(max_age)
-        
-        scheduler.add_job(
-            delete_old_job_executions,
-            trigger='cron',
-            day_of_week='mon',
-            hour=1,
-            minute=0,
-            id='delete_old_job_executions',
-            max_instances=1,
-            replace_existing=True,
-            name='Clean Old Job Executions'
-        )
-        
-        # Start the scheduler
-        scheduler.start()
-        logger.info("✅ NEPSE scheduler started successfully!")
-        logger.info("Next scraping job scheduled for Mon-Fri at 4:15 PM Nepal Time")
-        
-        return scheduler
-        
-    except ImportError as e:
-        logger.error(f"❌ Missing dependencies: {e}")
-        logger.info("Install with: pip install apscheduler django-apscheduler pytz")
-        return None
-    except Exception as e:
-        logger.error(f"❌ Failed to start scheduler: {e}")
-        return None
+        while True:
+            try:
+                result = check_and_scrape_if_needed()
+                logger.info(f"📋 Result: {result}")
+                
+                # Wait 30 minutes before next check
+                logger.info("⏳ Waiting 30 minutes for next check...")
+                time.sleep(30 * 60)  # 30 minutes
+                
+            except KeyboardInterrupt:
+                logger.info("🛑 Scraper stopped by user")
+                break
+            except Exception as e:
+                logger.error(f"❌ Error in scraper loop: {e}")
+                time.sleep(300)  # Wait 5 minutes on error
+    
+    # Start in background thread
+    thread = threading.Thread(target=scraper_loop, daemon=True)
+    thread.start()
+    
+    return True
+
+def start():
+    """Initialize the scraper"""
+    current = get_current_nepal_time()
+    
+    logger.info("=" * 60)
+    logger.info("🏦 NEPSE DAILY DATA SCRAPER")
+    logger.info("=" * 60)
+    logger.info(f"📅 Today: {current.strftime('%A, %B %d, %Y')}")
+    logger.info(f"⏰ Nepal Time: {current.strftime('%H:%M:%S')}")
+    logger.info("🕒 Market Hours: Mon-Fri, 11:00 AM - 3:00 PM")
+    logger.info("🔄 Will check every 30 minutes for fresh data")
+    logger.info("=" * 60)
+    
+    # Start immediate check
+    threading.Thread(target=check_and_scrape_if_needed, daemon=True).start()
+    
+    # Start periodic scraper
+    return start_daily_scraper()
+
+start_scheduler = start

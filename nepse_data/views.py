@@ -22,80 +22,7 @@ from .serializers import StockDataSerializer, CompanySerializer, TopGainersSeria
 
 logger = logging.getLogger(__name__)
 
-# ==================== DRF API Views (for Swagger) ====================
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def scrape_now_api(request):
-    """Manual trigger for scraping"""
-    try:
-        # Scrape data
-        stock_data = NepseScraper.scrape_today_prices()
-        
-        if stock_data:
-            # Save to database
-            saved_count = NepseScraper.save_to_database(stock_data)
-            
-            return Response({
-                'status': 'success',
-                'message': f'Scraped {len(stock_data)} stocks, saved {saved_count} records',
-                'data_count': len(stock_data),
-                'saved_count': saved_count
-            })
-        else:
-            return Response({
-                'status': 'error',
-                'message': 'No data scraped. The website structure might have changed.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-            
-    except Exception as e:
-        return Response({
-            'status': 'error',
-            'message': f'Scraping failed: {str(e)}'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def scrape_fresh_today_api(request):
-    """Always scrape fresh data for today, replacing existing"""
-    try:
-        today = timezone.now().date()
-        
-        # Delete existing data for today
-        deleted_count, _ = DailyStockData.objects.filter(date=today).delete()
-        logger.info(f"Deleted {deleted_count} existing records for {today}")
-        
-        # Scrape fresh data
-        stock_data = NepseScraper.scrape_with_retry()
-        
-        if stock_data and len(stock_data) > 10:
-            # Save to database
-            saved_count = NepseScraper.save_to_database(stock_data)
-            
-            # Update top performers
-            NepseScraper.update_top_performers(today)
-            
-            return Response({
-                'status': 'success',
-                'message': f'Scraped {saved_count} fresh records',
-                'deleted_old': deleted_count,
-                'added_new': saved_count,
-                'date': today.isoformat(),
-                'data_quality': 'complete' if saved_count > 200 else 'partial'
-            })
-        else:
-            return Response({
-                'status': 'error',
-                'message': 'No data scraped or insufficient data',
-                'data_count': len(stock_data) if stock_data else 0
-            }, status=status.HTTP_400_BAD_REQUEST)
-            
-    except Exception as e:
-        logger.error(f"Fresh scraping failed: {e}")
-        return Response({
-            'status': 'error',
-            'message': f'Scraping failed: {str(e)}'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+# ==================== DRF API Views (Data Access Only) ====================
 
 class LatestStocksAPI(APIView):
     """Get latest stock data"""
@@ -178,7 +105,7 @@ class LatestStocksAPI(APIView):
             'data': serializer.data,
             'market_summary': market_summary,
             'is_today_data': today_exists,
-            'next_scrape_scheduled': 'Mon-Fri at 4:15 PM Nepal Time'
+            'next_scrape_scheduled': 'Mon-Fri at 11:30 AM, 12:00 PM, 1:30 PM Nepal Time'
         })
 
 class TopGainersAPI(APIView):
@@ -290,55 +217,57 @@ class TopLosersAPI(APIView):
 def system_status_api(request):
     """Get system status and data statistics"""
     try:
-        # Count total records
-        total_companies = Company.objects.count()
-        total_records = DailyStockData.objects.count()
+        from .models import DailyStockData
+        from django.utils import timezone
+        from datetime import datetime
+        import pytz
         
-        # Get date range
-        date_range = DailyStockData.objects.aggregate(
-            earliest=Min('date'),
-            latest=Max('date')
-        )
+        today = timezone.now().date()
+        nepal_tz = pytz.timezone('Asia/Kathmandu')
+        current_nepal_time = datetime.now(nepal_tz)
         
-        # Count records per date
-        if date_range['latest']:
-            latest_date_count = DailyStockData.objects.filter(
-                date=date_range['latest']
-            ).count()
-        else:
-            latest_date_count = 0
+        # Check today's data
+        today_count = DailyStockData.objects.filter(date=today).count()
+        today_exists = today_count > 0
         
-        # Check scheduler status
-        scheduler_status = 'unknown'
-        try:
-            from apscheduler.schedulers.background import BackgroundScheduler
-            scheduler_status = 'available'
-        except ImportError:
-            scheduler_status = 'not_available'
+        # Get latest date in database
+        latest_date_result = DailyStockData.objects.aggregate(latest_date=Max('date'))
+        latest_date = latest_date_result.get('latest_date')
+        
+        # Check if market is open
+        weekday = current_nepal_time.weekday()
+        hour = current_nepal_time.hour
+        is_market_day = weekday < 5  # Monday-Friday
+        is_market_hours = 11 <= hour < 15
+        
+        market_status = "closed"
+        if is_market_day and is_market_hours:
+            market_status = "open"
+        elif not is_market_day:
+            market_status = "weekend"
         
         return Response({
             'status': 'success',
-            'system': {
-                'database': 'operational',
-                'scheduler': scheduler_status,
-                'timezone': str(timezone.get_current_timezone()),
-                'current_time': timezone.now().isoformat()
+            'current': {
+                'date': today.isoformat(),
+                'nepal_time': current_nepal_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'day': current_nepal_time.strftime('%A'),
+                'market_status': market_status,
+                'has_today_data': today_exists,
+                'today_records': today_count
             },
-            'data': {
-                'total_companies': total_companies,
-                'total_records': total_records,
-                'earliest_date': date_range['earliest'].isoformat() if date_range['earliest'] else None,
-                'latest_date': date_range['latest'].isoformat() if date_range['latest'] else None,
-                'records_in_latest_date': latest_date_count,
-                'coverage_percentage': round((latest_date_count / total_companies * 100) if total_companies > 0 else 0, 1)
+            'database': {
+                'total_companies': Company.objects.count(),
+                'total_records': DailyStockData.objects.count(),
+                'earliest_date': DailyStockData.objects.aggregate(earliest=Min('date'))['earliest'],
+                'latest_date': latest_date,
+                'latest_date_records': DailyStockData.objects.filter(date=latest_date).count() if latest_date else 0,
             },
-            'endpoints': {
-                'latest_stocks': '/api/stocks/latest/',
-                'top_gainers': '/api/top-gainers/',
-                'top_losers': '/api/top-losers/',
-                'stock_history': '/api/stocks/<symbol>/history/',
-                'search': '/api/stocks/search/?q=<query>',
-                'scrape_fresh': '/api/scrape-fresh/ (POST)'
+            'automation': {
+                'scraping_enabled': True,
+                'schedule': 'Every 30 minutes',
+                'market_hours_only': True,
+                'next_check': 'Within 30 minutes'
             }
         })
         
@@ -349,17 +278,7 @@ def system_status_api(request):
             'message': f'Error getting status: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# ==================== Django Function Views ====================
-
-@csrf_exempt
-def scrape_now(request):
-    """Manual trigger for scraping (legacy)"""
-    return scrape_now_api(request._request if hasattr(request, '_request') else request)
-
-@csrf_exempt
-def scrape_fresh_today(request):
-    """Always scrape fresh data for today, replacing existing (legacy)"""
-    return scrape_fresh_today_api(request._request if hasattr(request, '_request') else request)
+# ==================== Django Function Views (Legacy - Data Access Only) ====================
 
 def get_latest_stocks(request):
     """Get latest stock data (legacy)"""

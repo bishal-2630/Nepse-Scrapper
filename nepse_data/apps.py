@@ -1,32 +1,32 @@
 # nepse_data/apps.py
 from django.apps import AppConfig
-import sys
-import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class NepseDataConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'nepse_data'
     
     def ready(self):
-        # Skip for migration commands and shell
-        skip_for = ['makemigrations', 'migrate', 'shell', 'test', 'createsuperuser', 'collectstatic']
+        import sys
         
-        if any(cmd in sys.argv for cmd in skip_for):
+        # Skip for certain commands
+        skip_commands = ['makemigrations', 'migrate', 'test', 'collectstatic', 'shell']
+        if any(cmd in sys.argv for cmd in skip_commands):
             return
         
         # Only start when running server
         if 'runserver' in sys.argv:
-            # Check if we're in the auto-reloader child process
-            if os.environ.get('RUN_MAIN') or not os.environ.get('DJANGO_AUTORELOAD'):
-                try:
-                    from .scheduler import start_scheduler
-                    scheduler = start_scheduler()
-                    if scheduler:
-                        print("✅ NEPSE data scheduler initialized successfully")
-                    else:
-                        print("⚠️ Scheduler not started (check logs)")
-                except ImportError as e:
-                    print(f"⚠️ Scheduler module not available: {e}")
-                    print("Install with: pip install apscheduler django-apscheduler pytz")
-                except Exception as e:
-                    print(f"⚠️ Could not start scheduler: {e}")
+            try:
+                # Start market hours scraper
+                from .scheduler import start
+                if start():
+                    logger.info("✅ Market hours scraper started successfully!")
+                    logger.info("💡 The scraper will automatically run during market hours (Mon-Fri 11:00-15:00)")
+                else:
+                    logger.warning("⚠️ Scraper not started")
+            except ImportError as e:
+                logger.error(f"❌ Missing dependencies: {e}")
+            except Exception as e:
+                logger.error(f"❌ Failed to start scraper: {e}")
