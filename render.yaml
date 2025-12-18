@@ -22,7 +22,7 @@ services:
     name: nepse-celery-worker
     env: python
     buildCommand: "./build.sh"
-    startCommand: "celery -A nepse_scraper worker --loglevel=info"
+    startCommand: "celery -A nepse_scraper worker --loglevel=info --concurrency=1"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -32,6 +32,8 @@ services:
         sync: false
       - key: DEBUG
         value: "False"
+      - key: CELERY_BROKER_URL
+        value: "sqla+sqlite:///celerydb.sqlite3"
 
   - type: worker
     name: nepse-celery-beat
@@ -47,7 +49,11 @@ services:
         sync: false
       - key: DEBUG
         value: "False"
+      - key: CELERY_BROKER_URL
+        value: "sqla+sqlite:///celerydb.sqlite3"
 
 databases:
   - name: nepse-db
     plan: free
+    databaseName: nepse
+    user: nepse_user
