@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Exit on error
-set -o errexit
+# build.sh - Render deployment script
+
+echo "=== Starting NEPSE Scraper build ==="
 
 # Install dependencies
-pip install --upgrade pip
 pip install -r requirements.txt
 
-# Fix: Reinstall setuptools to ensure pkg_resources is available
-pip install --force-reinstall -U setuptools
-
 # Collect static files
-python manage.py collectstatic --no-input
+python manage.py collectstatic --noinput
 
 # Apply database migrations
-python manage.py migrate
+python manage.py migrate --noinput
+
+echo "=== Build complete ==="

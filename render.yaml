@@ -1,17 +1,53 @@
 services:
   - type: web
-    name: nepse-scraper
+    name: nepse-scraper-web
     env: python
-    plan: free
-    region: singapore
     buildCommand: "./build.sh"
-    startCommand: "gunicorn nepse_scraper.wsgi:application"
+    startCommand: "gunicorn nepse_scraper.wsgi:application --bind 0.0.0.0:$PORT"
     envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nepse-db
+          property: connectionString
       - key: SECRET_KEY
         generateValue: true
       - key: DEBUG
         value: "False"
-      - key: WEB_CONCURRENCY
-        value: 4
-    healthCheckPath: /
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com,localhost,127.0.0.1"
+    healthCheckPath: /api/status/
     autoDeploy: true
+
+  - type: worker
+    name: nepse-celery-worker
+    env: python
+    buildCommand: "./build.sh"
+    startCommand: "celery -A nepse_scraper worker --loglevel=info"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nepse-db
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: DEBUG
+        value: "False"
+
+  - type: worker
+    name: nepse-celery-beat
+    env: python
+    buildCommand: "./build.sh"
+    startCommand: "celery -A nepse_scraper beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nepse-db
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: DEBUG
+        value: "False"
+
+databases:
+  - name: nepse-db
+    plan: free
