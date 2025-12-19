@@ -7,6 +7,10 @@ from datetime import datetime, timedelta
 from django.db.models import Max, Q
 from .models import StockData, MarketStatus, Company
 from .serializers import StockDataSerializer
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from .tasks import scrape_24x7
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -256,3 +260,31 @@ class TopLosersView(APIView):
                 'status': 'error',
                 'message': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+@csrf_exempt
+def cron_trigger_scraping(request):
+    """API endpoint for Render Cron Job to trigger scraping"""
+    # Simple authentication
+    expected_secret = os.environ.get('CRON_SECRET', 'default-secret-123')
+    received_secret = request.headers.get('X-Cron-Secret')
+    
+    if received_secret != expected_secret:
+        logger.warning(f"Unauthorized cron attempt: {received_secret}")
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    
+    try:
+        # Run scraping synchronously (not .delay() since no Celery worker)
+        from .data_processor import NepseDataProcessor24x7
+        processor = NepseDataProcessor24x7()
+        result = processor.execute_24x7_scraping()
+        
+        logger.info(f"Cron scraping result: {result}")
+        return JsonResponse({
+            'status': 'success',
+            'records_saved': result.get('records_saved', 0),
+            'message': result.get('message', ''),
+            'timestamp': str(timezone.now())
+        })
+    except Exception as e:
+        logger.error(f"Cron scraping failed: {e}")
+        return JsonResponse({'error': str(e)}, status=500)
