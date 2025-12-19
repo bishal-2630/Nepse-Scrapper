@@ -1,0 +1,18 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+Django = "==4.2.7"
+djangorestframework = "==3.14.0"
+celery = "==5.3.4"
+requests = "==2.31.0"
+beautifulsoup4 = "==4.12.2"
+lxml = "==4.9.3"
+pandas = "==1.5.3"  # More compatible version
+psycopg2-binary = "==2.9.9"
+gunicorn = "==21.2.0"
+
+[requires]
+python_version = "3.9"  # This is crucial!
