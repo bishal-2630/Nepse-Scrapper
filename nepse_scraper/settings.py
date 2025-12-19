@@ -79,8 +79,9 @@ WSGI_APPLICATION = 'nepse_scraper.wsgi.application'
 # Database configuration for Render
 DATABASES = {
     'default': dj_database_url.config(
-        default=os.environ.get('DATABASE_URL', 'sqlite:///db.sqlite3'),
-        conn_max_age=600
+        default='sqlite:///db.sqlite3',
+        conn_max_age=600,
+        conn_health_checks=True,
     )
 }
 

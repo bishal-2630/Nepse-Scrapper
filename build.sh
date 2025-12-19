@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Exit on error
 set -o errexit
 
-# Install dependencies
+# Upgrade pip
+pip install --upgrade pip setuptools wheel
+
+# Install requirements
 pip install -r requirements.txt
+
+# Run migrations
+python manage.py migrate --no-input
 
 # Collect static files
 python manage.py collectstatic --no-input
 
-# Apply database migrations
-python manage.py migrate
-
-# Run initial scraping
+# Run initial setup
 python render_init.py
