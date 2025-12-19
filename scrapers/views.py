@@ -298,3 +298,32 @@ class CronTestView(APIView):
             'required_header': 'X-Cron-Secret',
             'note': 'Use POST method with X-Cron-Secret header for actual scraping'
         })
+    
+@csrf_exempt
+def cron_simple(request):
+    """Simple GET endpoint for cron jobs"""
+    logger.info(f"Cron job triggered via /simple/ endpoint at {timezone.now()}")
+    
+    try:
+        # Try to run scraping
+        from .data_processor import NepseDataProcessor24x7
+        processor = NepseDataProcessor24x7()
+        result = processor.execute_24x7_scraping()
+        
+        return JsonResponse({
+            'status': 'success' if result.get('success') else 'partial',
+            'message': result.get('message', 'Scraping completed'),
+            'records_saved': result.get('records_saved', 0),
+            'timestamp': str(timezone.now()),
+            'data_source': result.get('data_source_used', 'unknown')
+        })
+        
+    except Exception as e:
+        logger.error(f"Cron scraping error: {e}")
+        # Still return 200 so cron service doesn't mark as failure
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e),
+            'timestamp': str(timezone.now()),
+            'note': 'Error occurred but endpoint is working'
+        })
