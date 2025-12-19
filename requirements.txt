@@ -13,6 +13,6 @@ dj-database-url==3.0.1
 python-dotenv==1.2.1
 nepse==0.1.7
 requests==2.31.0
-pandas==2.2.2
+pandas==2.2.3
 python-dateutil==2.9.0.post0
 urllib3==1.26.18
