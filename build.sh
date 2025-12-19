@@ -4,7 +4,7 @@
 echo "=== Starting NEPSE Scraper build ==="
 
 # Install dependencies
-pip install -r requirements.txt
+pip install --only-binary :all: --find-links https://wheels.grahamw.net/simple/ -r requirements.txt
 
 # Apply database migrations
 python manage.py migrate --noinput
