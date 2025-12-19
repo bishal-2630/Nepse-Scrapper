@@ -6,8 +6,8 @@ django-celery-beat==2.5.0
 django-celery-results==2.5.0
 requests==2.31.0
 beautifulsoup4==4.12.2
-lxml==4.9.4
-pandas==2.0.3  # Updated version compatible with newer Python
+lxml==4.9.3
+pandas==1.5.3  # Changed from 1.3.5 - better compatibility
 python-dotenv==1.0.0
 psycopg2-binary==2.9.9
 gunicorn==21.2.0
