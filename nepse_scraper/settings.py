@@ -129,13 +129,17 @@ REST_FRAMEWORK = {
 CORS_ALLOW_ALL_ORIGINS = True  # Allow all for API access
 
 # Celery Configuration
-CELERY_BROKER_URL = os.environ.get('REDIS_URL', 'sqla+sqlite:///celerydb.sqlite3')
+CELERY_BROKER_URL = f"db+{os.environ.get('DATABASE_URL')}"  # Use PostgreSQL as broker
 CELERY_RESULT_BACKEND = 'django-db'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
+CELERY_TIMEZONE = 'Asia/Kathmandu'
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# For Celery to use Django database properly
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 
 # Market hours (Nepal Time)
 MARKET_OPEN_HOUR = 11
