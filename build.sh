@@ -17,6 +17,9 @@ pip install --only-binary=:all: numpy>=1.24.0 pandas>=2.2.3
 echo "Installing other requirements..."
 pip install -r requirements.txt
 
+python manage.py migrate --no-input
+python manage.py collectstatic --no-input
+
 # 5. Verify installations
 echo "Verifying key packages..."
 python -c "import django; print(f'Django {django.__version__}')"
