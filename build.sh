@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-# build.sh - Render deployment script
+
 set -o errexit
 
 echo "=== Starting NEPSE Scraper build ==="
