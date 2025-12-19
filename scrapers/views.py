@@ -301,29 +301,43 @@ class CronTestView(APIView):
     
 @csrf_exempt
 def cron_simple(request):
-    """Simple GET endpoint for cron jobs"""
-    logger.info(f"Cron job triggered via /simple/ endpoint at {timezone.now()}")
+    """Endpoint that actually scrapes and saves data"""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Use GET method'}, status=405)
+    
+    logger.info(f"=== SCRAPING TRIGGERED via cron at {timezone.now()} ===")
     
     try:
-        # Try to run scraping
+        # THIS IS WHAT SCRAPES DATA
         from .data_processor import NepseDataProcessor24x7
         processor = NepseDataProcessor24x7()
+        
+        # This function does the actual scraping and saving
         result = processor.execute_24x7_scraping()
         
+        # Check if data was saved
+        records_saved = result.get('records_saved', 0)
+        
+        if records_saved > 0:
+            message = f"✅ Successfully scraped and saved {records_saved} stock records"
+        else:
+            message = "⚠️ Scraping completed but no new records saved"
+        
+        logger.info(f"Scraping result: {result}")
+        
         return JsonResponse({
-            'status': 'success' if result.get('success') else 'partial',
-            'message': result.get('message', 'Scraping completed'),
-            'records_saved': result.get('records_saved', 0),
-            'timestamp': str(timezone.now()),
-            'data_source': result.get('data_source_used', 'unknown')
+            'status': 'success',
+            'message': message,
+            'records_saved': records_saved,
+            'data_source': result.get('data_source_used', 'unknown'),
+            'market_session': result.get('market_session', 'unknown'),
+            'timestamp': str(timezone.now())
         })
         
     except Exception as e:
-        logger.error(f"Cron scraping error: {e}")
-        # Still return 200 so cron service doesn't mark as failure
+        logger.error(f"❌ Scraping failed: {e}", exc_info=True)
         return JsonResponse({
             'status': 'error',
             'error': str(e),
-            'timestamp': str(timezone.now()),
-            'note': 'Error occurred but endpoint is working'
-        })
+            'timestamp': str(timezone.now())
+        }, status=500)
