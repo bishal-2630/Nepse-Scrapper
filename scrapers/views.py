@@ -261,30 +261,40 @@ class TopLosersView(APIView):
                 'message': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+
 @csrf_exempt
-def cron_trigger_scraping(request):
-    """API endpoint for Render Cron Job to trigger scraping"""
-    # Simple authentication
-    expected_secret = os.environ.get('CRON_SECRET', 'default-secret-123')
-    received_secret = request.headers.get('X-Cron-Secret')
-    
-    if received_secret != expected_secret:
-        logger.warning(f"Unauthorized cron attempt: {received_secret}")
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+def cron_simple_scrape(request):
+    """Simple cron endpoint without authentication (for testing)"""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
     
     try:
-        # Run scraping synchronously (not .delay() since no Celery worker)
+        # Run scraping synchronously
         from .data_processor import NepseDataProcessor24x7
         processor = NepseDataProcessor24x7()
         result = processor.execute_24x7_scraping()
         
-        logger.info(f"Cron scraping result: {result}")
+        logger.info(f"Cron scraping completed: {result}")
         return JsonResponse({
             'status': 'success',
             'records_saved': result.get('records_saved', 0),
             'message': result.get('message', ''),
-            'timestamp': str(timezone.now())
+            'timestamp': str(timezone.now()),
+            'data': result
         })
     except Exception as e:
         logger.error(f"Cron scraping failed: {e}")
         return JsonResponse({'error': str(e)}, status=500)
+          
+class CronTestView(APIView):
+    """Test endpoint for cron job"""
+    def get(self, request):
+        return Response({
+            'status': 'success',
+            'message': 'Cron endpoint is working',
+            'timestamp': timezone.now().isoformat(),
+            'endpoint': '/api/cron/scrape/',
+            'method': 'POST',
+            'required_header': 'X-Cron-Secret',
+            'note': 'Use POST method with X-Cron-Secret header for actual scraping'
+        })
