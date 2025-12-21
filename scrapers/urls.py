@@ -9,4 +9,5 @@ urlpatterns = [
     path('stocks/top-losers/', views.TopLosersView.as_view(), name='top-losers'),
     path('cron/test/', views.CronTestView.as_view(), name='cron-test'), 
     path('cron/simple/', views.cron_simple_scrape, name='cron-simple'),
+    
 ]

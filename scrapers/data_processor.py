@@ -10,101 +10,113 @@ import logging
 logger = logging.getLogger(__name__)
 
 class NepseDataProcessor24x7:
-    """24/7 Data processor - ONLY processes available data"""
+    """24/7 Data processor - WITH FIXES FOR DEPLOYMENT"""
     
-    def __init__(self):
-        self.client = UnofficialNepseClientFinal()
-        self.current_time = timezone.localtime()
-        self.scrape_date = self.current_time.date()
-        self.scrape_time = self.current_time.time()
+    def execute_24x7_scraping(self) -> Dict[str, Any]:
+        """Main method: intelligent 24/7 scraping - WITH DEPLOYMENT FIXES"""
+        logger.info(f"[DEPLOYED] Starting 24/7 scraping for {self.scrape_date} {self.scrape_time}")
         
-        # Nepal market hours (Sunday-Thursday, 11:00-15:00)
-        self.market_open_time = time_obj(11, 0)
-        self.market_close_time = time_obj(15, 0)
+        # ALWAYS update companies first
+        companies_created, companies_updated = self.update_companies()
+        logger.info(f"[DEPLOYED] Company update: {companies_created} created, {companies_updated} updated")
         
-        # Determine if today is a trading day (0=Monday, 6=Sunday)
-        self.weekday = self.current_time.weekday()
-        self.is_trading_day = self.weekday in [6, 0, 1, 2, 3]  # Sun-Thu
+        # Try to get price data
+        price_data = None
+        max_attempts = 3
         
-        # Determine current market session
-        self.market_session = self._get_market_session()
-    
-    def _get_market_session(self) -> str:
-        """Determine current market session"""
-        if not self.is_trading_day:
-            return 'after_hours'
-        
-        if self.scrape_time < self.market_open_time:
-            return 'pre_open'
-        elif self.market_open_time <= self.scrape_time <= self.market_close_time:
-            return 'regular'
-        else:
-            return 'post_close'
-    
-    def _get_data_source_type(self) -> str:
-        """Determine what type of data to fetch"""
-        session = self.market_session
-        
-        if session == 'regular':
-            return 'live'
-        elif session == 'post_close':
-            # First 2 hours after close, try to get closing data
-            close_plus_2 = datetime.combine(self.scrape_date, self.market_close_time) + timedelta(hours=2)
-            if self.current_time < timezone.make_aware(close_plus_2):
-                return 'closing'
-            else:
-                return 'historical'
-        else:  # pre_open, after_hours, or non-trading day
-            return 'historical'
-    
-    def update_companies(self) -> Tuple[int, int]:
-        """Update company list - runs daily"""
-        companies_data = self.client.get_company_detailed_list()
-        if not companies_data:
-            logger.warning("No company data received")
-            return 0, 0
-        
-        created_count = 0
-        updated_count = 0
-        
-        for company_data in companies_data:
+        for attempt in range(max_attempts):
             try:
-                symbol = company_data.get('symbol', '').strip().upper()
-                name = company_data.get('companyName') or company_data.get('securityName', '').strip()
+                logger.info(f"[DEPLOYED] Attempt {attempt + 1}/{max_attempts} to get price data")
+                price_data = self.client.get_todays_price_data()
                 
-                if not symbol or not name:
-                    continue
-                
-                company, created = Company.objects.update_or_create(
-                    symbol=symbol,
-                    defaults={
-                        'name': name,
-                        'sector': company_data.get('sectorName', ''),
-                        'listed_shares': company_data.get('totalListedShares', 0) or 0,
-                        'is_active': company_data.get('status', '').upper() == 'ACTIVE',
-                    }
-                )
-                
-                if created:
-                    created_count += 1
-                    logger.debug(f"Created company: {symbol}")
+                if price_data and (price_data.get('gainers') or price_data.get('losers')):
+                    logger.info(f"[DEPLOYED] Got price data with {len(price_data.get('gainers', []))} gainers and {len(price_data.get('losers', []))} losers")
+                    break
                 else:
-                    updated_count += 1
+                    logger.warning(f"[DEPLOYED] No price data received, attempt {attempt + 1}")
                     
             except Exception as e:
-                logger.error(f"Error processing company {company_data.get('symbol')}: {e}")
-                continue
+                logger.error(f"[DEPLOYED] Error getting price data (attempt {attempt + 1}): {e}")
+            
+            if attempt < max_attempts - 1:
+                import time
+                time.sleep(2)  # Wait before retry
         
-        logger.info(f"Company update: {created_count} created, {updated_count} updated")
-        return created_count, updated_count
+        if not price_data:
+            logger.error("[DEPLOYED] Failed to get any price data after all attempts")
+            return {
+                'success': False,
+                'message': 'No price data available',
+                'companies_updated': f"{companies_created} created, {companies_updated} updated",
+                'records_saved': 0
+            }
+        
+        # Process data
+        saved_count = 0
+        scrape_time = self.scrape_time
+        
+        # Determine data source
+        if self.market_session == 'regular':
+            data_source = 'live'
+        else:
+            data_source = 'historical'
+            # Use a fixed time for non-live data
+            scrape_time = time_obj(15, 30)
+        
+        # Process gainers
+        gainers = price_data.get('gainers', [])
+        logger.info(f"[DEPLOYED] Processing {len(gainers)} gainers")
+        
+        for stock_item in gainers:
+            try:
+                saved = self._save_stock_record(stock_item, data_source, scrape_time)
+                if saved:
+                    saved_count += 1
+            except Exception as e:
+                logger.error(f"[DEPLOYED] Error saving gainer {stock_item.get('symbol')}: {e}")
+        
+        # Process losers
+        losers = price_data.get('losers', [])
+        logger.info(f"[DEPLOYED] Processing {len(losers)} losers")
+        
+        for stock_item in losers:
+            try:
+                saved = self._save_stock_record(stock_item, data_source, scrape_time)
+                if saved:
+                    saved_count += 1
+            except Exception as e:
+                logger.error(f"[DEPLOYED] Error saving loser {stock_item.get('symbol')}: {e}")
+        
+        # Update market status
+        self._update_market_status(saved_count > 0)
+        
+        result = {
+            'success': saved_count > 0,
+            'companies_updated': f"{companies_created} created, {companies_updated} updated",
+            'records_saved': saved_count,
+            'data_source_used': data_source,
+            'market_session': self.market_session,
+            'is_trading_day': self.is_trading_day,
+            'timestamp': str(timezone.now()),
+            'scrape_date': str(self.scrape_date),
+            'scrape_time': str(self.scrape_time),
+            'message': f'Scraped {saved_count} records via {data_source}'
+        }
+        
+        logger.info(f"[DEPLOYED] Scraping completed: {result}")
+        return result
     
     def _save_stock_record(self, stock_item: Dict, data_source: str, 
                           custom_time: time_obj = None) -> bool:
-        """Save individual stock record - ONLY available data"""
+        """Save individual stock record - ENHANCED FOR DEPLOYMENT"""
         try:
             symbol = stock_item.get('symbol', '').strip().upper()
             if not symbol:
+                logger.warning("[DEPLOYED] No symbol in stock item")
                 return False
+            
+            # DEBUG: Log what we're receiving
+            logger.debug(f"[DEPLOYED] Processing symbol: {symbol}, data: {stock_item}")
             
             # Get or create company
             company, created = Company.objects.get_or_create(
@@ -115,7 +127,7 @@ class NepseDataProcessor24x7:
                 }
             )
             
-            # Update company name if it exists
+            # Update company info if it exists
             if not created:
                 new_name = stock_item.get('securityName')
                 if new_name and company.name != new_name:
@@ -125,31 +137,37 @@ class NepseDataProcessor24x7:
             # Determine scrape time
             scrape_time = custom_time or self.scrape_time
             
-            # Check for existing record
+            # Check for existing record (with more flexible matching)
             existing = StockData.objects.filter(
                 company=company,
-                symbol=symbol,
                 scrape_date=self.scrape_date,
                 scrape_time=scrape_time,
                 data_source=data_source
             ).exists()
             
             if existing:
-                logger.debug(f"Duplicate record skipped: {symbol} {self.scrape_date} {scrape_time}")
+                logger.debug(f"[DEPLOYED] Duplicate record exists for {symbol} {self.scrape_date} {scrape_time}")
                 return False
             
-            # ✅ ONLY parse data we actually get from API
+            # Extract and clean data
+            close_price = self._parse_decimal(stock_item.get('cp'))
+            last_traded_price = self._parse_decimal(stock_item.get('ltp'))
+            previous_close = self._parse_decimal(stock_item.get('previousClose'))
+            difference = self._parse_decimal(stock_item.get('pointChange'))
+            percentage_change = self._parse_decimal(stock_item.get('percentageChange'))
+            
+            # Log what we're saving
+            logger.debug(f"[DEPLOYED] Saving {symbol}: LTP={last_traded_price}, Change={percentage_change}")
+            
+            # Create and save record
             stock_record = StockData(
                 company=company,
                 symbol=symbol,
-                # ✅ ACTUAL DATA FROM API:
-                close_price=self._parse_decimal(stock_item.get('cp')),
-                last_traded_price=self._parse_decimal(stock_item.get('ltp')),
-                previous_close=self._parse_decimal(stock_item.get('previousClose')),
-                difference=self._parse_decimal(stock_item.get('pointChange')),
-                percentage_change=self._parse_decimal(stock_item.get('percentageChange')),
-                
-                # Metadata
+                close_price=close_price,
+                last_traded_price=last_traded_price,
+                previous_close=previous_close,
+                difference=difference,
+                percentage_change=percentage_change,
                 scrape_date=self.scrape_date,
                 scrape_time=scrape_time,
                 data_source=data_source,
@@ -157,10 +175,11 @@ class NepseDataProcessor24x7:
             )
             
             stock_record.save()
+            logger.info(f"[DEPLOYED] ✅ Saved record for {symbol}")
             return True
             
         except Exception as e:
-            logger.error(f"Error saving stock record for {stock_item.get('symbol')}: {e}")
+            logger.error(f"[DEPLOYED] ❌ Error saving {stock_item.get('symbol')}: {e}", exc_info=True)
             return False
     
     def scrape_live_market_data(self) -> Dict[str, Any]:
