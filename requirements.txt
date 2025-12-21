@@ -8,7 +8,6 @@ django-celery-beat==2.5.0
 django-celery-results==2.5.1
 
 # Database
-psycopg2-binary==2.9.7  # Optional, for PostgreSQL
 dj-database-url==2.0.0
 
 # API & Web
