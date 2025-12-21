@@ -44,6 +44,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://*.ngrok.io",
     "https://*.ngrok-free.app",
     "https://*.trycloudflare.com",
+    "http://*.trycloudflare.com",
     "https://niagara-los-protocols-cottage.trycloudflare.com",
     "http://niagara-los-protocols-cottage.trycloudflare.com",
 ]
@@ -79,11 +80,10 @@ INSTALLED_APPS = [
     'scrapers',
 ]
 
-# Minimal middleware for mobile performance
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # CORS first
+    'corsheaders.middleware.CorsMiddleware',  # MUST BE FIRST or at least before CommonMiddleware
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  # For static files
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -91,6 +91,29 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+CORS_ALLOW_CREDENTIALS = True
 
 ROOT_URLCONF = 'nepse_scraper.urls'
 
