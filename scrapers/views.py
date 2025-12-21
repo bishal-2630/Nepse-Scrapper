@@ -45,95 +45,107 @@ class MarketStatusView(APIView):
             })
 
 class LatestStocksView(APIView):
-    """Get latest stock data - FIXED VERSION"""
+    """Get latest stock data - FIXED TIMEZONE VERSION"""
     
     def get(self, request):
         try:
-            # Always use Nepal timezone
-            import pytz
-            nepal_tz = pytz.timezone('Asia/Kathmandu')
-            nepal_time = timezone.now().astimezone(nepal_tz)
-            today = nepal_time.date()
+            # Get the LATEST date in the database (not today's date)
+            latest_date_result = StockData.objects.aggregate(latest_date=Max('scrape_date'))
+            latest_date = latest_date_result.get('latest_date')
             
-            logger.info(f"[DEPLOYED] LatestStocksView called with Nepal time: {nepal_time}")
+            if not latest_date:
+                return Response({
+                    'status': 'success',
+                    'date': str(latest_date) if latest_date else 'No date',
+                    'count': 0,
+                    'data': [],
+                    'message': 'No stock data available in database',
+                    'timestamp': str(timezone.now())
+                })
             
-            # Get ALL data for today, sorted by time
-            todays_data = StockData.objects.filter(
-                scrape_date=today
-            ).select_related('company').order_by('-scrape_time', '-created_at')
+            # Get the latest scrape time for that date
+            latest_time_result = StockData.objects.filter(
+                scrape_date=latest_date
+            ).aggregate(latest_time=Max('scrape_time'))
+            latest_time = latest_time_result.get('latest_time')
             
-            logger.info(f"[DEPLOYED] Total records for {today}: {todays_data.count()}")
+            if not latest_time:
+                return Response({
+                    'status': 'success',
+                    'date': str(latest_date),
+                    'count': 0,
+                    'data': [],
+                    'message': 'No data found for the latest date',
+                    'timestamp': str(timezone.now())
+                })
             
-            if not todays_data.exists():
-                # If no data for today, get the most recent data from ANY day
-                logger.info(f"[DEPLOYED] No data for {today}, getting latest from any day")
+            # Get all data for the latest date/time
+            stocks = StockData.objects.filter(
+                scrape_date=latest_date,
+                scrape_time=latest_time
+            ).select_related('company').order_by('-percentage_change')
+            
+            serializer = StockDataSerializer(stocks, many=True)
+            
+            # Calculate summary statistics
+            summary = {}
+            if stocks.exists():
+                # Get all percentage changes
+                changes = []
+                for stock in stocks:
+                    if stock.percentage_change is not None:
+                        try:
+                            changes.append(float(stock.percentage_change))
+                        except (ValueError, TypeError):
+                            continue
                 
-                # Get the most recent date in the database
-                latest_date = StockData.objects.aggregate(
-                    latest_date=Max('scrape_date')
-                )['latest_date']
-                
-                if latest_date:
-                    latest_data = StockData.objects.filter(
-                        scrape_date=latest_date
-                    ).select_related('company').order_by('-scrape_time', '-created_at')
+                if changes:
+                    avg_change = sum(changes) / len(changes)
                     
-                    logger.info(f"[DEPLOYED] Found {latest_data.count()} records from {latest_date}")
+                    # Find top gainer (highest positive change)
+                    gainers = [s for s in stocks if s.percentage_change and float(s.percentage_change) > 0]
+                    top_gainer = max(gainers, key=lambda x: float(x.percentage_change)) if gainers else None
                     
-                    # Get the latest scrape time for this date
-                    latest_scrape_time = latest_data.first().scrape_time if latest_data.exists() else None
+                    # Find top loser (lowest negative change)
+                    losers = [s for s in stocks if s.percentage_change and float(s.percentage_change) < 0]
+                    top_loser = min(losers, key=lambda x: float(x.percentage_change)) if losers else None
                     
-                    serializer = StockDataSerializer(latest_data, many=True)
+                    summary = {
+                        'average_percentage_change': round(avg_change, 2),
+                        'total_companies': len(changes)
+                    }
                     
-                    # Calculate summary
-                    summary = self._calculate_summary(latest_data)
+                    if top_gainer:
+                        summary['top_gainer'] = {
+                            'symbol': top_gainer.symbol,
+                            'company_name': top_gainer.company.name if top_gainer.company else top_gainer.symbol,
+                            'percentage_change': float(top_gainer.percentage_change),
+                            'last_traded_price': float(top_gainer.last_traded_price) if top_gainer.last_traded_price else 0
+                        }
                     
-                    return Response({
-                        'status': 'success',
-                        'date': str(latest_date),
-                        'scrape_time': str(latest_scrape_time) if latest_scrape_time else None,
-                        'count': len(serializer.data),
-                        'summary': summary,
-                        'data': serializer.data,
-                        'message': f'Showing latest available data from {latest_date}',
-                        'note': 'No data available for today yet'
-                    })
-                else:
-                    return Response({
-                        'status': 'success',
-                        'date': str(today),
-                        'count': 0,
-                        'data': [],
-                        'message': 'No stock data available in database',
-                        'timestamp': str(nepal_time)
-                    })
-            
-            # If we have data for today, process it
-            # Group by scrape_time to show latest batch
-            latest_scrape_time = todays_data.first().scrape_time
-            latest_batch = todays_data.filter(scrape_time=latest_scrape_time)
-            
-            logger.info(f"[DEPLOYED] Latest batch at {latest_scrape_time}: {latest_batch.count()} records")
-            
-            serializer = StockDataSerializer(latest_batch, many=True)
-            summary = self._calculate_summary(latest_batch)
+                    if top_loser:
+                        summary['top_loser'] = {
+                            'symbol': top_loser.symbol,
+                            'company_name': top_loser.company.name if top_loser.company else top_loser.symbol,
+                            'percentage_change': float(top_loser.percentage_change),
+                            'last_traded_price': float(top_loser.last_traded_price) if top_loser.last_traded_price else 0
+                        }
             
             return Response({
                 'status': 'success',
-                'date': str(today),
-                'scrape_time': str(latest_scrape_time),
+                'date': str(latest_date),
+                'scrape_time': str(latest_time),
                 'count': len(serializer.data),
                 'summary': summary,
                 'data': serializer.data,
-                'timestamp': str(nepal_time)
+                'timestamp': str(timezone.now())
             })
             
         except Exception as e:
-            logger.error(f"[DEPLOYED] Error in LatestStocksView: {e}", exc_info=True)
+            logger.error(f"Error in LatestStocksView: {e}", exc_info=True)
             return Response({
                 'status': 'error',
-                'message': str(e),
-                'timestamp': str(timezone.now())
+                'message': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def _calculate_summary(self, queryset):
