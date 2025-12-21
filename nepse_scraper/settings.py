@@ -20,6 +20,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-mobile-android-nepse-server-2024-key')
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'  # Keep True for debugging on mobile
 
+# ==================== HTTPS/SSL CONFIGURATION ====================
+# Required for Serveo/Cloudflare/ngrok HTTPS
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = False  # Set to True in production
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.trycloudflare.com',
+    'https://*.ngrok.io',
+    'https://*.ngrok-free.app',
+    'https://*.serveo.net',
+    'https://*.serveousercontent.com',
+    'https://b62558c61342216b-27-34-65-211.serveousercontent.com',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
+
 # Android mobile specific - allow all for ngrok and local network
 ALLOWED_HOSTS = [
     'localhost',
@@ -32,11 +49,15 @@ ALLOWED_HOSTS = [
     '*.loca.lt',  # LocalTunnel domain
     '*.onrender.com',
     '*.trycloudflare.com',  # Render domain (if using)
+    # Serveo specific domains
+    'b62558c61342216b-27-34-65-211.serveousercontent.com',
+    '*.serveousercontent.com',
     '*',  # Allow all for simplicity - RESTRICT IN PRODUCTION!
 ]
 
 # CORS - Allow all for API access
 CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:8000",
@@ -47,7 +68,36 @@ CORS_ALLOWED_ORIGINS = [
     "http://*.trycloudflare.com",
     "https://niagara-los-protocols-cottage.trycloudflare.com",
     "http://niagara-los-protocols-cottage.trycloudflare.com",
+    "https://*.serveo.net",
+    "https://*.serveousercontent.com",
+    "https://b62558c61342216b-27-34-65-211.serveousercontent.com",
 ]
+
+# Enhanced CORS for mobile and public access
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-forwarded-proto',
+    'x-forwarded-host',
+]
+
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
 
 # CSRF trusted origins for POST requests from ngrok
 CSRF_TRUSTED_ORIGINS = [
@@ -58,6 +108,8 @@ CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:8000',
     'https://*.trycloudflare.com',
     'https://niagara-los-protocols-cottage.trycloudflare.com',
+    'https://*.serveousercontent.com',
+    'https://b62558c61342216b-27-34-65-211.serveousercontent.com',
 ]
 
 # ==================== APPLICATION DEFINITION ====================
@@ -80,6 +132,11 @@ INSTALLED_APPS = [
     'scrapers',
 ]
 
+# Add Swagger if enabled
+ENABLE_SWAGGER = os.environ.get('ENABLE_SWAGGER', 'True') == 'True'
+if ENABLE_SWAGGER:
+    INSTALLED_APPS.append('drf_yasg')
+
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # MUST BE FIRST or at least before CommonMiddleware
     'django.middleware.security.SecurityMiddleware',
@@ -91,29 +148,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
-
-CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
-]
-
-CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
-]
-
-CORS_ALLOW_CREDENTIALS = True
 
 ROOT_URLCONF = 'nepse_scraper.urls'
 
@@ -135,7 +169,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'nepse_scraper.wsgi.application'
 
-
+# ==================== DATABASE ====================
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -145,8 +179,6 @@ DATABASES = {
         }
     }
 }
-
-
 
 # Simplified for mobile API server
 AUTH_PASSWORD_VALIDATORS = [
@@ -290,7 +322,8 @@ LOGGING = {
 # Create logs directory if it doesn't exist
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)
 
-if 'trycloudflare.com' in ALLOWED_HOSTS[0]:
+# SSL redirection for HTTPS domains
+if 'trycloudflare.com' in ALLOWED_HOSTS[0] or 'serveousercontent.com' in ALLOWED_HOSTS[0]:
     SECURE_SSL_REDIRECT = True
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SESSION_COOKIE_SECURE = True
@@ -315,11 +348,8 @@ DATABASE_POOL_ARGS = {
 }
 
 # ==================== API DOCUMENTATION ====================
-# Swagger/OpenAPI settings (optional, can be disabled to save memory)
-ENABLE_SWAGGER = os.environ.get('ENABLE_SWAGGER', 'True') == 'True'
-
+# Swagger/OpenAPI settings
 if ENABLE_SWAGGER:
-    INSTALLED_APPS.append('drf_yasg')
     SWAGGER_SETTINGS = {
         'SECURITY_DEFINITIONS': None,
         'USE_SESSION_AUTH': False,
@@ -327,6 +357,7 @@ if ENABLE_SWAGGER:
         'OPERATIONS_SORTER': 'alpha',
         'DOC_EXPANSION': 'none',
         'DEFAULT_MODEL_RENDERING': 'example',
+        'VALIDATOR_URL': None,  # Disable validator for HTTPS
     }
 
 # ==================== PERFORMANCE OPTIMIZATIONS ====================
@@ -349,14 +380,24 @@ MAX_SCRAPING_ATTEMPTS = 3
 SCRAPING_TIMEOUT = 30  # seconds
 
 # ==================== ANDROID SPECIFIC ====================
-# Path for Android shared storage
-ANDROID_SHARED_STORAGE = os.path.join(
-    os.environ.get('EXTERNAL_STORAGE', '/storage/emulated/0'),
-    'NEPSE-Server'
-)
-
-# Create shared directory if it doesn't exist
-os.makedirs(ANDROID_SHARED_STORAGE, exist_ok=True)
+# Android storage paths - FIXED FOR TERMUX
+try:
+    # Try to use Termux's shared storage
+    ANDROID_SHARED_STORAGE = os.path.join(
+        os.environ.get('HOME', '/data/data/com.termux/files/home'),
+        'storage', 'shared', 'NEPSE-Server'
+    )
+    
+    # Create directory if it doesn't exist
+    os.makedirs(ANDROID_SHARED_STORAGE, exist_ok=True)
+    
+except PermissionError:
+    # Fallback to internal storage
+    ANDROID_SHARED_STORAGE = os.path.join(
+        os.environ.get('HOME', '/data/data/com.termux/files/home'),
+        'NEPSE-Server'
+    )
+    os.makedirs(ANDROID_SHARED_STORAGE, exist_ok=True)
 
 # Backup directory
 BACKUP_DIR = os.path.join(ANDROID_SHARED_STORAGE, 'backups')
@@ -369,8 +410,6 @@ HEALTH_CHECK_ENDPOINTS = [
     '/health/',
     '/api/cron/test/',
 ]
-
-
 
 # ==================== FALLBACK SETTINGS ====================
 # If certain services are unavailable, fall back to simpler alternatives
