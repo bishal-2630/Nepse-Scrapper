@@ -1,20 +1,27 @@
-Django==4.2.27
-django-cors-headers==4.9.0
-djangorestframework==3.16.1
-drf-yasg==1.21.11
-celery==5.6.0
-redis==7.1.0
-django-celery-beat==2.8.1
-django-celery-results==2.6.0
-#psycopg2-binary==2.9.11
-whitenoise==6.11.0
-gunicorn==23.0.0
-dj-database-url==3.0.1
-python-dotenv==1.2.1
-nepse==0.1.7
+# Core Django
+Django==4.2.7
+djangorestframework==3.14.0
+
+# Celery (lightweight configuration)
+celery==5.3.1
+django-celery-beat==2.5.0
+django-celery-results==2.5.1
+
+# Database
+psycopg2-binary==2.9.7  # Optional, for PostgreSQL
+dj-database-url==2.0.0
+
+# API & Web
+gunicorn==21.2.0
+whitenoise==6.5.0
+drf-yasg==1.21.5  # Optional, for API docs
+django-cors-headers==4.1.0
+
+# Utilities
+python-dotenv==1.0.0
 requests==2.31.0
-pandas==2.2.3
-python-dateutil==2.9.0.post0
-urllib3==1.26.18
-django-db-geventpool 
-psycogreen
+pytz==2023.3
+redis==4.6.0  # Optional, for Redis broker
+
+# Mobile optimization
+django-compressor==4.3.1  # Optional, for static files

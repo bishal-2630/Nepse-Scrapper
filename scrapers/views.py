@@ -68,28 +68,48 @@ class LatestStocksView(APIView):
     
     def get(self, request):
         try:
-            today = timezone.now().date()
+            # FIX: Use consistent Nepal timezone
+            import pytz
+            nepal_tz = pytz.timezone('Asia/Kathmandu')
+            current_time = timezone.now().astimezone(nepal_tz)
+            today = current_time.date()
+            
+            logger.info(f"[DEBUG] LatestStocksView called")
+            logger.info(f"[DEBUG] UTC time: {timezone.now()}")
+            logger.info(f"[DEBUG] Nepal time: {current_time}")
+            logger.info(f"[DEBUG] Using date: {today}")
             
             # Get the latest scrape time for today
             latest_scrape = StockData.objects.filter(
                 scrape_date=today
             ).aggregate(latest_time=Max('scrape_time'))['latest_time']
             
+            logger.info(f"[DEBUG] Latest scrape time from DB: {latest_scrape}")
+            
             if not latest_scrape:
+                logger.warning(f"[DEBUG] No latest scrape time for {today}")
                 # If no data for today, try to get the most recent data from any day
                 latest_scrape_date = StockData.objects.aggregate(latest_date=Max('scrape_date'))['latest_date']
+                logger.info(f"[DEBUG] Latest date in entire DB: {latest_scrape_date}")
+                
                 if latest_scrape_date:
                     latest_scrape = StockData.objects.filter(
                         scrape_date=latest_scrape_date
                     ).aggregate(latest_time=Max('scrape_time'))['latest_time']
                     
+                    logger.info(f"[DEBUG] Fallback - Latest scrape time from {latest_scrape_date}: {latest_scrape}")
+                    
                     # Get data from the latest available day
                     stocks = StockData.objects.filter(
                         scrape_date=latest_scrape_date,
                         scrape_time=latest_scrape
-                    ).select_related('company').order_by('-percentage_change')  # CHANGED: from -turnover to -percentage_change
+                    ).select_related('company').order_by('-percentage_change')
+                    
+                    logger.info(f"[DEBUG] Fallback - Queryset count: {stocks.count()}")
                     
                     serializer = StockDataSerializer(stocks, many=True)
+                    
+                    logger.info(f"[DEBUG] Fallback - Serialized count: {len(serializer.data)}")
                     
                     return Response({
                         'status': 'success',
@@ -97,31 +117,44 @@ class LatestStocksView(APIView):
                         'scrape_time': latest_scrape,
                         'count': len(serializer.data),
                         'data': serializer.data,
-                        'message': f'Showing latest available data from {latest_scrape_date}'
+                        'message': f'Showing latest available data from {latest_scrape_date}',
+                        'debug': {
+                            'today_requested': str(today),
+                            'date_used': str(latest_scrape_date),
+                            'reason': 'No data for today'
+                        }
                     })
                 else:
+                    logger.warning("[DEBUG] No data found in entire database")
                     return Response({
                         'status': 'success',
                         'date': str(today),
                         'count': 0,
                         'data': [],
-                        'message': 'No stock data available'
+                        'message': 'No stock data available',
+                        'debug': {
+                            'today_requested': str(today),
+                            'reason': 'Database empty'
+                        }
                     })
             
             # Get latest data for today with company info
             stocks = StockData.objects.filter(
                 scrape_date=today,
                 scrape_time=latest_scrape
-            ).select_related('company').order_by('-percentage_change')  # CHANGED: from -turnover to -percentage_change
+            ).select_related('company').order_by('-percentage_change')
+            
+            logger.info(f"[DEBUG] Main query - Queryset count: {stocks.count()}")
+            
+            if stocks.exists():
+                logger.info(f"[DEBUG] First stock symbol: {stocks[0].symbol}")
+                logger.info(f"[DEBUG] First stock company: {stocks[0].company.name if stocks[0].company else 'No company'}")
             
             serializer = StockDataSerializer(stocks, many=True)
+            logger.info(f"[DEBUG] Main query - Serialized data count: {len(serializer.data)}")
             
             # Calculate summary statistics (UPDATED - no turnover)
             if stocks.exists():
-                # REMOVED: total_turnover calculation
-                # total_turnover = sum(float(stock.turnover) for stock in stocks if stock.turnover)
-                # total_volume = sum(stock.volume for stock in stocks if stock.volume)
-                
                 # Calculate average change
                 changes = [float(stock.percentage_change) for stock in stocks if stock.percentage_change is not None]
                 avg_change = sum(changes) / len(changes) if changes else 0
@@ -135,17 +168,16 @@ class LatestStocksView(APIView):
                     top_loser = min(stocks_with_change, key=lambda x: x[1])[0]
                     
                     summary = {
-                        # REMOVED: total_turnover, total_volume
                         'average_percentage_change': round(avg_change, 2),
                         'top_gainer': {
-                            'symbol': top_gainer.company.symbol,
-                            'company_name': top_gainer.company.name,
+                            'symbol': top_gainer.company.symbol if top_gainer.company else top_gainer.symbol,
+                            'company_name': top_gainer.company.name if top_gainer.company else "Unknown",
                             'percentage_change': float(top_gainer.percentage_change) if top_gainer.percentage_change else 0,
                             'last_traded_price': float(top_gainer.last_traded_price) if top_gainer.last_traded_price else 0
                         },
                         'top_loser': {
-                            'symbol': top_loser.company.symbol,
-                            'company_name': top_loser.company.name,
+                            'symbol': top_loser.company.symbol if top_loser.company else top_loser.symbol,
+                            'company_name': top_loser.company.name if top_loser.company else "Unknown",
                             'percentage_change': float(top_loser.percentage_change) if top_loser.percentage_change else 0,
                             'last_traded_price': float(top_loser.last_traded_price) if top_loser.last_traded_price else 0
                         }
@@ -155,20 +187,32 @@ class LatestStocksView(APIView):
             else:
                 summary = {}
             
+            logger.info(f"[DEBUG] Returning response with {len(serializer.data)} records")
+            
             return Response({
                 'status': 'success',
                 'date': str(today),
                 'scrape_time': latest_scrape,
                 'count': len(serializer.data),
                 'summary': summary,
-                'data': serializer.data
+                'data': serializer.data,
+                'debug': {
+                    'today_used': str(today),
+                    'scrape_time_used': str(latest_scrape),
+                    'records_found': stocks.count(),
+                    'records_serialized': len(serializer.data)
+                }
             })
             
         except Exception as e:
-            logger.error(f"Error fetching latest stocks: {e}", exc_info=True)
+            logger.error(f"[DEBUG] Error in LatestStocksView: {e}", exc_info=True)
             return Response({
                 'status': 'error',
-                'message': str(e)
+                'message': str(e),
+                'debug': {
+                    'error_type': type(e).__name__,
+                    'traceback': str(e.__traceback__) if hasattr(e, '__traceback__') else 'No traceback'
+                }
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class TopGainersView(APIView):
