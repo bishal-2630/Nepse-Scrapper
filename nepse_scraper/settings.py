@@ -30,7 +30,8 @@ ALLOWED_HOSTS = [
     '*.ngrok-free.app',  # ngrok free domain
     '*.serveo.net',  # Serveo domain
     '*.loca.lt',  # LocalTunnel domain
-    '*.onrender.com',  # Render domain (if using)
+    '*.onrender.com',
+    '*.trycloudflare.com',  # Render domain (if using)
     '*',  # Allow all for simplicity - RESTRICT IN PRODUCTION!
 ]
 
@@ -42,6 +43,9 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "https://*.ngrok.io",
     "https://*.ngrok-free.app",
+    "https://*.trycloudflare.com",
+    "https://niagara-los-protocols-cottage.trycloudflare.com",
+    "http://niagara-los-protocols-cottage.trycloudflare.com",
 ]
 
 # CSRF trusted origins for POST requests from ngrok
@@ -51,6 +55,8 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.serveo.net',
     'http://localhost:8000',
     'http://127.0.0.1:8000',
+    'https://*.trycloudflare.com',
+    'https://niagara-los-protocols-cottage.trycloudflare.com',
 ]
 
 # ==================== APPLICATION DEFINITION ====================
@@ -106,8 +112,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'nepse_scraper.wsgi.application'
 
-# ==================== DATABASE ====================
-# SQLite for Android mobile (lightweight, no separate service needed)
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -118,12 +123,8 @@ DATABASES = {
     }
 }
 
-# Optional: PostgreSQL if you want to use external DB
-# DATABASE_URL = os.environ.get('DATABASE_URL')
-# if DATABASE_URL:
-#     DATABASES['default'] = dj_database_url.config(default=DATABASE_URL)
 
-# ==================== PASSWORD VALIDATION ====================
+
 # Simplified for mobile API server
 AUTH_PASSWORD_VALIDATORS = [
     {
