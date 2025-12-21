@@ -267,14 +267,11 @@ LOGGING = {
 # Create logs directory if it doesn't exist
 os.makedirs(BASE_DIR / 'logs', exist_ok=True)
 
-# ==================== MOBILE OPTIMIZATION ====================
-# Disable SSL redirect for local/ngrok testing
-SECURE_SSL_REDIRECT = False
-SESSION_COOKIE_SECURE = False
-CSRF_COOKIE_SECURE = False
-
-# Disable HTTPS for local development
-SECURE_PROXY_SSL_HEADER = None
+if 'trycloudflare.com' in ALLOWED_HOSTS[0]:
+    SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 # Reduce cache size for mobile
 CACHES = {
