@@ -4,13 +4,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from datetime import datetime, timedelta
-from django.db.models import Max, Q
+from django.db.models import Max, Q, Avg
 from .models import StockData, MarketStatus, Company
 from .serializers import StockDataSerializer
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from .tasks import scrape_24x7
-import os
+import pytz
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,8 +18,6 @@ class MarketStatusView(APIView):
     """Get current market status"""
     
     def get(self, request):
-        # Use Nepal timezone consistently
-        import pytz
         nepal_tz = pytz.timezone('Asia/Kathmandu')
         nepal_time = timezone.now().astimezone(nepal_tz)
         today = nepal_time.date()
@@ -45,18 +42,18 @@ class MarketStatusView(APIView):
             })
 
 class LatestStocksView(APIView):
-    """Get latest stock data - FIXED TIMEZONE VERSION"""
+    """Get latest stock data for ALL symbols"""
     
     def get(self, request):
         try:
-            # Get the LATEST date in the database (not today's date)
+            # Get the LATEST date in the database
             latest_date_result = StockData.objects.aggregate(latest_date=Max('scrape_date'))
             latest_date = latest_date_result.get('latest_date')
             
             if not latest_date:
                 return Response({
                     'status': 'success',
-                    'date': str(latest_date) if latest_date else 'No date',
+                    'date': None,
                     'count': 0,
                     'data': [],
                     'message': 'No stock data available in database',
@@ -88,48 +85,7 @@ class LatestStocksView(APIView):
             serializer = StockDataSerializer(stocks, many=True)
             
             # Calculate summary statistics
-            summary = {}
-            if stocks.exists():
-                # Get all percentage changes
-                changes = []
-                for stock in stocks:
-                    if stock.percentage_change is not None:
-                        try:
-                            changes.append(float(stock.percentage_change))
-                        except (ValueError, TypeError):
-                            continue
-                
-                if changes:
-                    avg_change = sum(changes) / len(changes)
-                    
-                    # Find top gainer (highest positive change)
-                    gainers = [s for s in stocks if s.percentage_change and float(s.percentage_change) > 0]
-                    top_gainer = max(gainers, key=lambda x: float(x.percentage_change)) if gainers else None
-                    
-                    # Find top loser (lowest negative change)
-                    losers = [s for s in stocks if s.percentage_change and float(s.percentage_change) < 0]
-                    top_loser = min(losers, key=lambda x: float(x.percentage_change)) if losers else None
-                    
-                    summary = {
-                        'average_percentage_change': round(avg_change, 2),
-                        'total_companies': len(changes)
-                    }
-                    
-                    if top_gainer:
-                        summary['top_gainer'] = {
-                            'symbol': top_gainer.symbol,
-                            'company_name': top_gainer.company.name if top_gainer.company else top_gainer.symbol,
-                            'percentage_change': float(top_gainer.percentage_change),
-                            'last_traded_price': float(top_gainer.last_traded_price) if top_gainer.last_traded_price else 0
-                        }
-                    
-                    if top_loser:
-                        summary['top_loser'] = {
-                            'symbol': top_loser.symbol,
-                            'company_name': top_loser.company.name if top_loser.company else top_loser.symbol,
-                            'percentage_change': float(top_loser.percentage_change),
-                            'last_traded_price': float(top_loser.last_traded_price) if top_loser.last_traded_price else 0
-                        }
+            summary = self._calculate_summary(stocks)
             
             return Response({
                 'status': 'success',
@@ -153,86 +109,84 @@ class LatestStocksView(APIView):
         if not queryset.exists():
             return {}
         
-        # Get stocks with percentage change
-        stocks_with_change = []
-        for stock in queryset:
-            if stock.percentage_change is not None:
-                try:
-                    change_val = float(stock.percentage_change)
-                    stocks_with_change.append((stock, change_val))
-                except (ValueError, TypeError):
-                    continue
+        # Calculate average percentage change
+        avg_result = queryset.filter(
+            percentage_change__isnull=False
+        ).aggregate(avg_change=Avg('percentage_change'))
         
-        if not stocks_with_change:
-            return {}
-        
-        # Calculate average
-        changes = [change for _, change in stocks_with_change]
-        avg_change = sum(changes) / len(changes)
+        avg_change = avg_result.get('avg_change')
         
         # Find top gainer and loser
-        top_gainer_stock, top_gainer_val = max(stocks_with_change, key=lambda x: x[1])
-        top_loser_stock, top_loser_val = min(stocks_with_change, key=lambda x: x[1])
+        top_gainer = queryset.filter(
+            percentage_change__isnull=False
+        ).order_by('-percentage_change').first()
         
-        return {
-            'average_percentage_change': round(avg_change, 2),
-            'top_gainer': {
-                'symbol': top_gainer_stock.symbol,
-                'company_name': top_gainer_stock.company.name if top_gainer_stock.company else "Unknown",
-                'percentage_change': top_gainer_val,
-                'last_traded_price': float(top_gainer_stock.last_traded_price) if top_gainer_stock.last_traded_price else 0
-            },
-            'top_loser': {
-                'symbol': top_loser_stock.symbol,
-                'company_name': top_loser_stock.company.name if top_loser_stock.company else "Unknown",
-                'percentage_change': top_loser_val,
-                'last_traded_price': float(top_loser_stock.last_traded_price) if top_loser_stock.last_traded_price else 0
+        top_loser = queryset.filter(
+            percentage_change__isnull=False
+        ).order_by('percentage_change').first()
+        
+        summary = {}
+        
+        if avg_change is not None:
+            summary['average_percentage_change'] = float(avg_change)
+        
+        if top_gainer:
+            summary['top_gainer'] = {
+                'symbol': top_gainer.symbol,
+                'company_name': top_gainer.company.name if top_gainer.company else top_gainer.symbol,
+                'percentage_change': float(top_gainer.percentage_change) if top_gainer.percentage_change else 0,
+                'last_traded_price': float(top_gainer.last_traded_price) if top_gainer.last_traded_price else 0
             }
-        }
+        
+        if top_loser:
+            summary['top_loser'] = {
+                'symbol': top_loser.symbol,
+                'company_name': top_loser.company.name if top_loser.company else top_loser.symbol,
+                'percentage_change': float(top_loser.percentage_change) if top_loser.percentage_change else 0,
+                'last_traded_price': float(top_loser.last_traded_price) if top_loser.last_traded_price else 0
+            }
+        
+        summary['total_companies'] = queryset.count()
+        
+        return summary
 
 class TopGainersView(APIView):
-    """Get top 10 gainers - FIXED VERSION"""
+    """Get top 10 gainers"""
     
     def get(self, request):
         try:
-            # Use Nepal timezone
-            import pytz
-            nepal_tz = pytz.timezone('Asia/Kathmandu')
-            nepal_time = timezone.now().astimezone(nepal_tz)
-            today = nepal_time.date()
+            # Get the LATEST date in the database
+            latest_date_result = StockData.objects.aggregate(latest_date=Max('scrape_date'))
+            latest_date = latest_date_result.get('latest_date')
             
-            # Get latest data for today
-            todays_data = StockData.objects.filter(
-                scrape_date=today
-            ).select_related('company').order_by('-scrape_time')
+            if not latest_date:
+                return Response({
+                    'status': 'success',
+                    'date': None,
+                    'count': 0,
+                    'data': [],
+                    'message': 'No data available'
+                })
             
-            if not todays_data.exists():
-                # Fallback to latest date
-                latest_date = StockData.objects.aggregate(
-                    latest_date=Max('scrape_date')
-                )['latest_date']
-                
-                if not latest_date:
-                    return Response({
-                        'status': 'success',
-                        'date': str(today),
-                        'count': 0,
-                        'data': [],
-                        'message': 'No data available'
-                    })
-                
-                todays_data = StockData.objects.filter(
-                    scrape_date=latest_date
-                ).select_related('company').order_by('-scrape_time')
-                today = latest_date
+            # Get the latest scrape time for that date
+            latest_time_result = StockData.objects.filter(
+                scrape_date=latest_date
+            ).aggregate(latest_time=Max('scrape_time'))
+            latest_time = latest_time_result.get('latest_time')
             
-            # Get latest scrape time
-            latest_scrape_time = todays_data.first().scrape_time if todays_data.exists() else None
+            if not latest_time:
+                return Response({
+                    'status': 'success',
+                    'date': str(latest_date),
+                    'count': 0,
+                    'data': [],
+                    'message': 'No data found for the latest date'
+                })
             
             # Get top gainers (positive change)
             top_gainers = StockData.objects.filter(
-                scrape_date=today,
-                scrape_time=latest_scrape_time,
+                scrape_date=latest_date,
+                scrape_time=latest_time,
                 percentage_change__gt=0
             ).select_related('company').order_by('-percentage_change')[:10]
             
@@ -240,8 +194,8 @@ class TopGainersView(APIView):
             
             return Response({
                 'status': 'success',
-                'date': str(today),
-                'scrape_time': str(latest_scrape_time) if latest_scrape_time else None,
+                'date': str(latest_date),
+                'scrape_time': str(latest_time),
                 'count': len(serializer.data),
                 'data': serializer.data
             })
@@ -254,48 +208,42 @@ class TopGainersView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class TopLosersView(APIView):
-    """Get top 10 losers - FIXED VERSION"""
+    """Get top 10 losers"""
     
     def get(self, request):
         try:
-            # Use Nepal timezone
-            import pytz
-            nepal_tz = pytz.timezone('Asia/Kathmandu')
-            nepal_time = timezone.now().astimezone(nepal_tz)
-            today = nepal_time.date()
+            # Get the LATEST date in the database
+            latest_date_result = StockData.objects.aggregate(latest_date=Max('scrape_date'))
+            latest_date = latest_date_result.get('latest_date')
             
-            # Get latest data for today
-            todays_data = StockData.objects.filter(
-                scrape_date=today
-            ).select_related('company').order_by('-scrape_time')
+            if not latest_date:
+                return Response({
+                    'status': 'success',
+                    'date': None,
+                    'count': 0,
+                    'data': [],
+                    'message': 'No data available'
+                })
             
-            if not todays_data.exists():
-                # Fallback to latest date
-                latest_date = StockData.objects.aggregate(
-                    latest_date=Max('scrape_date')
-                )['latest_date']
-                
-                if not latest_date:
-                    return Response({
-                        'status': 'success',
-                        'date': str(today),
-                        'count': 0,
-                        'data': [],
-                        'message': 'No data available'
-                    })
-                
-                todays_data = StockData.objects.filter(
-                    scrape_date=latest_date
-                ).select_related('company').order_by('-scrape_time')
-                today = latest_date
+            # Get the latest scrape time for that date
+            latest_time_result = StockData.objects.filter(
+                scrape_date=latest_date
+            ).aggregate(latest_time=Max('scrape_time'))
+            latest_time = latest_time_result.get('latest_time')
             
-            # Get latest scrape time
-            latest_scrape_time = todays_data.first().scrape_time if todays_data.exists() else None
+            if not latest_time:
+                return Response({
+                    'status': 'success',
+                    'date': str(latest_date),
+                    'count': 0,
+                    'data': [],
+                    'message': 'No data found for the latest date'
+                })
             
             # Get top losers (negative change)
             top_losers = StockData.objects.filter(
-                scrape_date=today,
-                scrape_time=latest_scrape_time,
+                scrape_date=latest_date,
+                scrape_time=latest_time,
                 percentage_change__lt=0
             ).select_related('company').order_by('percentage_change')[:10]
             
@@ -303,8 +251,8 @@ class TopLosersView(APIView):
             
             return Response({
                 'status': 'success',
-                'date': str(today),
-                'scrape_time': str(latest_scrape_time) if latest_scrape_time else None,
+                'date': str(latest_date),
+                'scrape_time': str(latest_time),
                 'count': len(serializer.data),
                 'data': serializer.data
             })
@@ -329,10 +277,7 @@ def cron_simple_scrape(request):
         from .data_processor import NepseDataProcessor24x7
         processor = NepseDataProcessor24x7()
         
-        # Force update companies first
-        companies_created, companies_updated = processor.update_companies()
-        
-        # Then scrape data
+        # Run scraping
         result = processor.execute_24x7_scraping()
         
         # Log detailed result
@@ -340,7 +285,7 @@ def cron_simple_scrape(request):
         
         return JsonResponse({
             'status': 'success',
-            'companies_updated': f"{companies_created} created, {companies_updated} updated",
+            'companies_updated': result.get('companies_updated', '0 created, 0 updated'),
             'records_saved': result.get('records_saved', 0),
             'data_source': result.get('data_source_used', 'unknown'),
             'message': 'Forced scraping completed',

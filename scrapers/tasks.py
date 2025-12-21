@@ -1,7 +1,7 @@
 # scrapers/tasks.py - CORRECTED VERSION
 from celery import shared_task
 from django.utils import timezone
-from django.db.models import Count, Max, Min, Avg
+from django.db.models import Count, Max, Min, Avg, Sum
 from datetime import timedelta, datetime, time as time_obj
 import logging
 from .data_processor import NepseDataProcessor24x7
@@ -45,7 +45,7 @@ def force_closing_data():
     
     try:
         processor = NepseDataProcessor24x7()
-        result = processor.scrape_closing_data()
+        result = processor.execute_24x7_scraping()
         
         if result.get('success'):
             logger.info(f"Closing data scraped: {result.get('records_saved', 0)} records")
@@ -155,13 +155,6 @@ def daily_maintenance():
         # 5. UPDATE MARKET STATUS WITH STATS
         if not market_status.last_scraped or (timezone.now() - market_status.last_scraped).seconds > 3600:
             market_status.last_scraped = timezone.now()
-            
-            # Update turnover if we have data
-            if stats['today_records'] > 0:
-                total_turnover = today_data.aggregate(Sum('turnover'))['turnover__sum']
-                if total_turnover:
-                    market_status.total_turnover = total_turnover
-            
             market_status.save()
         
         logger.info(f"Daily maintenance complete. Stats: {stats}")
@@ -176,127 +169,4 @@ def daily_maintenance():
         
     except Exception as e:
         logger.error(f"Daily maintenance failed: {e}", exc_info=True)
-        return {'status': 'error', 'error': str(e)}
-
-@shared_task
-def backup_historical_data():
-    """Optional: Backup historical data to external storage"""
-    logger.info("Starting historical data backup...")
-    
-    try:
-        # This is a placeholder for backup logic
-        # You could export to CSV, JSON, or sync with cloud storage
-        
-        # Example: Get oldest and newest data dates
-        date_range = StockData.objects.aggregate(
-            oldest=Min('scrape_date'),
-            newest=Max('scrape_date'),
-            total_records=Count('id')
-        )
-        
-        logger.info(f"Historical data range: {date_range['oldest']} to {date_range['newest']}")
-        logger.info(f"Total records to preserve: {date_range['total_records']}")
-        
-        return {
-            'status': 'success',
-            'action': 'backup_report',
-            'oldest_date': str(date_range['oldest']),
-            'newest_date': str(date_range['newest']),
-            'total_records': date_range['total_records'],
-            'timestamp': str(timezone.now())
-        }
-        
-    except Exception as e:
-        logger.error(f"Backup failed: {e}")
-        return {'status': 'error', 'error': str(e)}
-
-@shared_task
-def fill_missing_data():
-    """Attempt to fill missing data for recent days"""
-    logger.info("Attempting to fill missing historical data...")
-    
-    try:
-        today = timezone.now().date()
-        processor = NepseDataProcessor24x7()
-        
-        # Check last 3 days for missing data
-        filled_days = []
-        
-        for days_back in range(1, 4):  # Check yesterday, 2 days ago, 3 days ago
-            check_date = today - timedelta(days=days_back)
-            
-            # Check if we have closing data for this date
-            has_closing_data = StockData.objects.filter(
-                scrape_date=check_date,
-                data_source='closing'
-            ).exists()
-            
-            if not has_closing_data:
-                logger.info(f"Missing closing data for {check_date}, attempting to fill...")
-                
-                # Try to get historical data
-                result = processor.scrape_historical_data(check_date)
-                
-                if result.get('success'):
-                    filled_days.append({
-                        'date': str(check_date),
-                        'records_added': result.get('price_records_saved', 0),
-                        'status': 'filled'
-                    })
-                else:
-                    filled_days.append({
-                        'date': str(check_date),
-                        'status': 'failed',
-                        'reason': result.get('message', 'Unknown error')
-                    })
-        
-        return {
-            'status': 'success',
-            'action': 'fill_missing_data',
-            'filled_days': filled_days,
-            'timestamp': str(timezone.now())
-        }
-        
-    except Exception as e:
-        logger.error(f"Fill missing data failed: {e}")
-        return {'status': 'error', 'error': str(e)}
-
-@shared_task
-def test_scraping_pipeline():
-    """Test the entire scraping pipeline"""
-    logger.info("Testing scraping pipeline...")
-    
-    try:
-        # Test company update
-        processor = NepseDataProcessor24x7()
-        companies_created, companies_updated = processor.update_companies()
-        
-        # Test live data
-        live_result = processor.scrape_live_market_data()
-        
-        # Test closing data
-        closing_result = processor.scrape_closing_data()
-        
-        # Get database stats
-        total_companies = Company.objects.count()
-        total_stocks = StockData.objects.count()
-        today_stocks = StockData.objects.filter(
-            scrape_date=timezone.now().date()
-        ).count()
-        
-        return {
-            'status': 'success',
-            'companies_updated': f"{companies_created} created, {companies_updated} updated",
-            'live_data': live_result.get('success', False),
-            'closing_data': closing_result.get('success', False),
-            'database_stats': {
-                'total_companies': total_companies,
-                'total_stock_records': total_stocks,
-                'today_records': today_stocks
-            },
-            'timestamp': str(timezone.now())
-        }
-        
-    except Exception as e:
-        logger.error(f"Test scraping pipeline failed: {e}", exc_info=True)
         return {'status': 'error', 'error': str(e)}
