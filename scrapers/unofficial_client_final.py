@@ -1,5 +1,5 @@
 # scrapers/unofficial_client_final.py
-from nepse import Nepse
+from nepse import NEPSE
 import logging
 from typing import Dict, List, Optional, Any
 from django.utils import timezone
@@ -10,7 +10,7 @@ class UnofficialNepseClientFinal:
     """Final client implementing the combined data strategy."""
     
     def __init__(self):
-        self.client = Nepse()
+        self.client = NEPSE()
         self.client.setTLSVerification(False)
         logger.info("NEPSE client initialized with combined data strategy")
     
