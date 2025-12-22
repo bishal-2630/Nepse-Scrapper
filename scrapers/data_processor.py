@@ -287,3 +287,56 @@ class NepseDataProcessor24x7:
         except Exception as e:
             logger.error(f"Error updating market status: {e}")
             return False
+    
+    # Add to NepseDataProcessor24x7 class
+def execute_scraping(self):
+    """Simplified main scraping method"""
+    try:
+        # Always update companies first
+        companies_created, companies_updated = self.update_companies()
+        
+        # Get price data
+        price_data = self.client.get_todays_price_data()
+        
+        if not price_data or (not price_data.get('gainers') and not price_data.get('losers')):
+            logger.warning("No price data available")
+            return {
+                'success': False,
+                'message': 'No price data available',
+                'companies_updated': f"{companies_created} created, {companies_updated} updated"
+            }
+        
+        # Process and save data
+        saved_count = 0
+        data_source = 'live' if self.market_session == 'regular' else 'historical'
+        
+        # Process all stocks
+        all_stocks = price_data.get('gainers', []) + price_data.get('losers', [])
+        
+        for stock_item in all_stocks:
+            try:
+                saved = self._save_stock_record(stock_item, data_source, self.scrape_time)
+                if saved:
+                    saved_count += 1
+            except Exception as e:
+                logger.error(f"Error saving {stock_item.get('symbol')}: {e}")
+        
+        # Update market status
+        self._update_market_status(saved_count > 0)
+        
+        return {
+            'success': saved_count > 0,
+            'records_saved': saved_count,
+            'companies_updated': f"{companies_created} created, {companies_updated} updated",
+            'data_source': data_source,
+            'market_session': self.market_session,
+            'timestamp': str(timezone.now())
+        }
+        
+    except Exception as e:
+        logger.error(f"Scraping failed: {e}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e),
+            'timestamp': str(timezone.now())
+        }

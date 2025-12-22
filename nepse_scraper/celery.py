@@ -1,3 +1,4 @@
+# nepse_scraper/celery.py
 import os
 from celery import Celery
 from celery.schedules import crontab
@@ -14,24 +15,49 @@ app.conf.broker_connection_retry_on_startup = True
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
-# Optimized schedule for Android
+# OPTIMIZED MARKET-AWARE SCHEDULE
 app.conf.beat_schedule = {
-    # Every 30 minutes, 24/7
-    'scrape-24x7-every-30-minutes': {
-        'task': 'scrapers.tasks.scrape_24x7',
-        'schedule': 1800.0,  # 30 minutes in seconds
+    # 1. MARKET PREPARATION (10:55 AM - Before market opens)
+    'daily-market-preparation': {
+        'task': 'scrapers.tasks.daily_market_opening_task',
+        'schedule': crontab(hour=10, minute=55, day_of_week='sun,mon,tue,wed,thu'),
+        'args': (),
     },
     
-    # Force closing data at 3:30 PM Nepal Time (Sunday-Thursday)
-    'force-closing-data-3-30-pm': {
-        'task': 'scrapers.tasks.force_closing_data',
-        'schedule': crontab(hour=15, minute=30, day_of_week='0,1,2,3,4'),
+    # 2. LIVE MARKET SCRAPING (Every 5 minutes during market hours)
+    'live-market-scraping': {
+        'task': 'scrapers.tasks.scrape_market_data',
+        'schedule': crontab(
+            minute='*/5',  # Every 5 minutes
+            hour='11,12,13,14',  # 11 AM to 2:59 PM
+            day_of_week='sun,mon,tue,wed,thu'
+        ),
+        'args': (),
     },
     
-    # Daily maintenance at 4 PM
-    'daily-maintenance': {
-        'task': 'scrapers.tasks.daily_maintenance',
-        'schedule': crontab(hour=16, minute=0),
+    # 3. FINAL CLOSING DATA (3:30 PM - After market closes)
+    'market-closing-scrape': {
+        'task': 'scrapers.tasks.daily_market_closing_task',
+        'schedule': crontab(hour=15, minute=30, day_of_week='sun,mon,tue,wed,thu'),
+        'args': (),
+    },
+    
+    # 4. HEALTH CHECK (Every hour, 24/7)
+    'system-health-check': {
+        'task': 'scrapers.tasks.health_check_task',
+        'schedule': crontab(minute=0),  # Every hour at :00
+        'args': (),
+    },
+    
+    # 5. AFTER-HOURS CHECK (Every 30 minutes after market)
+    'after-hours-check': {
+        'task': 'scrapers.tasks.scrape_market_data',
+        'schedule': crontab(
+            minute='*/30',
+            hour='15,16,17,18,19,20,21,22,23',  # 3 PM to 11:59 PM
+            day_of_week='sun,mon,tue,wed,thu'
+        ),
+        'args': (),
     },
 }
 
