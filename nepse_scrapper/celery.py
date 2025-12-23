@@ -1,11 +1,11 @@
-# nepse_scraper/celery.py
+# nepse_scrapper/celery.py
 import os
 from celery import Celery
 from celery.schedules import crontab
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'nepse_scraper.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'nepse_scrapper.settings')
 
-app = Celery('nepse_scraper')
+app = Celery('nepse_scrapper')
 
 # For Android Termux, use memory broker
 app.conf.broker_url = 'memory://'

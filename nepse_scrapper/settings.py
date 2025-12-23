@@ -149,7 +149,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'nepse_scraper.urls'
+ROOT_URLCONF = 'nepse_scrapper.urls'
 
 TEMPLATES = [
     {
@@ -167,7 +167,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'nepse_scraper.wsgi.application'
+WSGI_APPLICATION = 'nepse_scrapper.wsgi.application'
 
 # ==================== DATABASE ====================
 DATABASES = {
