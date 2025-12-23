@@ -15,38 +15,29 @@ app.conf.broker_connection_retry_on_startup = True
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
-# OPTIMIZED MARKET-AWARE SCHEDULE
 app.conf.beat_schedule = {
-    # 1. MARKET PREPARATION (10:55 AM - Before market opens)
+    # 1. MARKET PREPARATION (10:55 AM)
     'daily-market-preparation': {
         'task': 'scrapers.tasks.daily_market_opening_task',
         'schedule': crontab(hour=10, minute=55, day_of_week='sun,mon,tue,wed,thu'),
-        'args': (),
     },
     
-    # 2. LIVE MARKET SCRAPING (Every 5 minutes during market hours)
+    # 2. LIVE MARKET SCRAPING (Every 5 minutes during market)
     'live-market-scraping': {
         'task': 'scrapers.tasks.scrape_market_data',
-        'schedule': crontab(
-            minute='*/5',  # Every 5 minutes
-            hour='11,12,13,14',  # 11 AM to 2:59 PM
-            day_of_week='sun,mon,tue,wed,thu'
-        ),
-        'args': (),
+        'schedule': crontab(minute='*/5', hour='11,12,13,14', day_of_week='sun,mon,tue,wed,thu'),
     },
     
-    # 3. FINAL CLOSING DATA (3:30 PM - After market closes)
+    # 3. FINAL CLOSING (3:30 PM)
     'market-closing-scrape': {
         'task': 'scrapers.tasks.daily_market_closing_task',
         'schedule': crontab(hour=15, minute=30, day_of_week='sun,mon,tue,wed,thu'),
-        'args': (),
     },
     
-    # 4. HEALTH CHECK (Every hour, 24/7)
+    # 4. HEALTH CHECK (Every hour)
     'system-health-check': {
         'task': 'scrapers.tasks.health_check_task',
-        'schedule': crontab(minute=0),  # Every hour at :00
-        'args': (),
+        'schedule': crontab(minute=0),
     },
     
     # 5. AFTER-HOURS CHECK (Every 30 minutes after market)
